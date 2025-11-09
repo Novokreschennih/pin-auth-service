@@ -11,7 +11,7 @@ const ACCESS_MAP = {
 
 async function handlePostRequest(req, res) {
   try {
-    const { pin_code, app_id } = req.body;
+    const { pin: pin_code, app_id } = req.body;
     if (!pin_code || !app_id) {
       return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
     }
