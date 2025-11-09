@@ -28,14 +28,12 @@ const pool = new Pool({
 });
 
 async function handlePostRequest(req, res) {
-  const body = await parseBody(req);
-console.log("Received parsed body:", body); // Добавим лог, чтобы видеть результат
-const { pin_code, app_id } = body;
+ 
   try {
     // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Читаем и парсим тело вручную ---
     const body = await parseBody(req);
 
-    const { pin_code, app_id } = body;
+    const { pin: pin_code, appId: app_id } = body;
     if (!pin_code || !app_id) {
       return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
     }
