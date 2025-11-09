@@ -2,39 +2,17 @@
 const BPIUM_CATALOG_ID = 'pin-codes';
 const FIELD_ID_PIN_CODE = '2';
 const FIELD_ID_PRODUCT_TYPE = '3';
-const FIELD_ID_IS_USED = '4';
+// Поле is_used нам больше не нужно для логики, но оставляем его ID для ясности
+const FIELD_ID_IS_USED = '4'; 
 const ACCESS_MAP = {
   '2': ['app1', 'app2', 'app3', 'app4'],
   '1': ['app1', 'app2'],
 };
-const ID_IS_USED_NO = '1';
-const ID_IS_USED_YES = '2';
-// --- КОНЕЦ НАСТРОЕ-К ---
-
-// Вспомогательная функция для ручного чтения тела запроса
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      try {
-        resolve(JSON.parse(body));
-      } catch (e) {
-        reject(e);
-      }
-    });
-  });
-}
+// --- КОНЕЦ НАСТРОЕК ---
 
 async function handlePostRequest(req, res) {
   try {
-    // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Читаем и парсим тело вручную ---
-    const body = await parseBody(req);
-    // ----------------------------------------------------
-
-    const { pin_code, app_id } = body;
+    const { pin_code, app_id } = req.body;
     if (!pin_code || !app_id) {
       return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
     }
@@ -47,17 +25,19 @@ async function handlePostRequest(req, res) {
     }
 
     const basicAuth = 'Basic ' + Buffer.from(BPIUM_USER + ':' + BPIUM_PASSWORD).toString('base64');
-    const headers = { 'Authorization': basicAuth, 'Content-Type': 'application/json' };
 
+    // Ищем пин-код, ИГНОРИРУЯ статус is_used
     const filters = {
-      [FIELD_ID_PIN_CODE]: pin_code,
-      [FIELD_ID_IS_USED]: { "$or": [ID_IS_USED_NO] }
+      [FIELD_ID_PIN_CODE]: pin_code
     };
     
     const params = new URLSearchParams({ filters: JSON.stringify(filters), limit: 1 });
     const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records?${params.toString()}`;
 
-    const findResponse = await fetch(findUrl, { method: 'GET', headers: { 'Authorization': basicAuth } });
+    const findResponse = await fetch(findUrl, {
+      method: 'GET',
+      headers: { 'Authorization': basicAuth }
+    });
 
     if (!findResponse.ok) {
       throw new Error(`Bpium find request failed with status ${findResponse.status}`);
@@ -66,8 +46,9 @@ async function handlePostRequest(req, res) {
     const records = await findResponse.json();
     const record = records[0];
 
+    // Если запись не найдена, значит пин-код просто не существует
     if (!record) {
-      return res.status(404).json({ isValid: false, message: 'PIN not found or already used.' });
+      return res.status(404).json({ isValid: false, message: 'PIN not found.' });
     }
 
     const productTypeId = record.values[FIELD_ID_PRODUCT_TYPE];
@@ -76,19 +57,9 @@ async function handlePostRequest(req, res) {
       return res.status(403).json({ isValid: false, message: 'Access to this application is denied for this PIN.' });
     }
 
-    const updateUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/${record.id}`;
-    const updatePayload = { values: { [FIELD_ID_IS_USED]: [ID_IS_USED_YES] } };
+    // БЛОК ОБНОВЛЕНИЯ ПОЛНОСТЬЮ УДАЛЕН
 
-    const updateResponse = await fetch(updateUrl, {
-      method: 'PATCH',
-      headers: headers,
-      body: JSON.stringify(updatePayload)
-    });
-
-    if (!updateResponse.ok) {
-      throw new Error(`Bpium update request failed with status ${updateResponse.status}`);
-    }
-
+    // Если все проверки пройдены, отправляем успешный ответ
     return res.status(200).json({ isValid: true, message: 'Access granted' });
 
   } catch (error) {
@@ -97,7 +68,7 @@ async function handlePostRequest(req, res) {
   }
 }
 
-// Главный обработчик
+// Главный обработчик (остается без изменений)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
