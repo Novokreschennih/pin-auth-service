@@ -1,69 +1,47 @@
+const { Pool } = require('pg');
+
 // --- НАСТРОЙКИ ---
-const BPIUM_CATALOG_ID = 'pin-codes';
-const FIELD_ID_PIN_CODE = '2';
-const FIELD_ID_PRODUCT_TYPE = '3';
-// Поле is_used нам больше не нужно для логики, но оставляем его ID для ясности
-const FIELD_ID_IS_USED = '4'; 
 const ACCESS_MAP = {
-  '2': ['app1', 'app2', 'app3', 'app4'],
-  '1': ['app1', 'app2'],
+  // 'product_type из БД': ['список id приложений']
+  'full_package': ['app1', 'app2', 'app3', 'app4'],
+  'base_package': ['app1', 'app2'],
 };
 // --- КОНЕЦ НАСТРОЕК ---
 
+// Создаем пул соединений. Он будет переиспользовать соединения для скорости.
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
 async function handlePostRequest(req, res) {
+  const { pin_code, app_id } = req.body;
+  if (!pin_code || !app_id) {
+    return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
+  }
+
   try {
-    const { pin_code, app_id } = req.body;
-    if (!pin_code || !app_id) {
-      return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
-    }
+    const query = 'SELECT product_type FROM pin_codes WHERE pin_code = $1';
+    const result = await pool.query(query, [pin_code]);
 
-    const BPIUM_USER = process.env.BPIUM_USER;
-    const BPIUM_PASSWORD = process.env.BPIUM_PASSWORD;
-    if (!BPIUM_USER || !BPIUM_PASSWORD) {
-      console.error('Server Error: Bpium credentials are not set.');
-      return res.status(500).json({ isValid: false, message: 'Server configuration error' });
-    }
+    const record = result.rows[0];
 
-    const basicAuth = 'Basic ' + Buffer.from(BPIUM_USER + ':' + BPIUM_PASSWORD).toString('base64');
-
-    // Ищем пин-код, ИГНОРИРУЯ статус is_used
-    const filters = {
-      [FIELD_ID_PIN_CODE]: pin_code
-    };
-    
-    const params = new URLSearchParams({ filters: JSON.stringify(filters), limit: 1 });
-    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records?${params.toString()}`;
-
-    const findResponse = await fetch(findUrl, {
-      method: 'GET',
-      headers: { 'Authorization': basicAuth }
-    });
-
-    if (!findResponse.ok) {
-      throw new Error(`Bpium find request failed with status ${findResponse.status}`);
-    }
-
-    const records = await findResponse.json();
-    const record = records[0];
-
-    // Если запись не найдена, значит пин-код просто не существует
+    // Если запись не найдена, значит пин-код не существует
     if (!record) {
       return res.status(404).json({ isValid: false, message: 'PIN not found.' });
     }
 
-    const productTypeId = record.values[FIELD_ID_PRODUCT_TYPE];
-    const allowedApps = ACCESS_MAP[productTypeId];
+    const productType = record.product_type;
+    const allowedApps = ACCESS_MAP[productType];
+
     if (!allowedApps || !allowedApps.includes(app_id)) {
       return res.status(403).json({ isValid: false, message: 'Access to this application is denied for this PIN.' });
     }
-
-    // БЛОК ОБНОВЛЕНИЯ ПОЛНОСТЬЮ УДАЛЕН
-
-    // Если все проверки пройдены, отправляем успешный ответ
+    
+    // Пин-код верный и доступ разрешен
     return res.status(200).json({ isValid: true, message: 'Access granted' });
 
   } catch (error) {
-    console.error('Error during PIN validation:', error.message);
+    console.error('Database query error:', error);
     return res.status(500).json({ isValid: false, message: 'An error occurred while validating the PIN.' });
   }
 }
