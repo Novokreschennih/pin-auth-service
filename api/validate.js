@@ -11,17 +11,16 @@ const ACCESS_MAP = {
 
 async function handlePostRequest(req, res) {
   try {
-      console.log("Received request body:", req.body);
-    const { pin: pin_code, app_id } = req.body;
-    if (!pin_code || !app_id) {
-      return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
-    }
+    // --- ГЛАВНОЕ ИЗМЕНЕНИЕ ---
+    // Vercel не всегда автоматически парсит body.
+    // Мы делаем это вручную, чтобы гарантировать результат.
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    // ----------------------------
 
-    const BPIUM_USER = process.env.BPIUM_USER;
-    const BPIUM_PASSWORD = process.env.BPIUM_PASSWORD;
-    if (!BPIUM_USER || !BPIUM_PASSWORD) {
-      console.error('Server Error: Bpium credentials are not set.');
-      return res.status(500).json({ isValid: false, message: 'Server configuration error' });
+    const { pin_code, app_id } = body; // Теперь используем нашу переменную body
+    if (!pin_code || !app_id) {
+      console.error("Validation Error: pin_code or app_id is missing in body.", body);
+      return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
     }
 
     // Создаем заголовок для Basic Auth
