@@ -11,6 +11,7 @@ const ACCESS_MAP = {
 
 async function handlePostRequest(req, res) {
   try {
+      console.log("Received request body:", req.body);
     const { pin: pin_code, app_id } = req.body;
     if (!pin_code || !app_id) {
       return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
@@ -27,7 +28,7 @@ async function handlePostRequest(req, res) {
     const basicAuth = 'Basic ' + Buffer.from(BPIUM_USER + ':' + BPIUM_PASSWORD).toString('base64');
 
     // 4. Ищем пин-код в Бипиуме с помощью fetch
-    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records`;
+    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/find`;
     const findPayload = {
       filters: {
         and: [
