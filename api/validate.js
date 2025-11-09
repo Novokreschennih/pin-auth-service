@@ -63,7 +63,7 @@ export default async function handler(req, res) {
   try {
     // 4. Ищем пин-код в Бипиуме
     // ИСПРАВЛЕНО: URL для поиска записей должен заканчиваться на /find
-    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/find`;
+    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records`;
     const findPayload = {
       filters: {
         and: [
