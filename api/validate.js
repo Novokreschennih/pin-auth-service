@@ -1,6 +1,3 @@
-// Импортируем axios
-const axios = require('axios');
-
 // --- НАСТРОЙКИ ---
 const BPIUM_CATALOG_ID = 'pin-codes';
 const FIELD_ID_PIN_CODE = '2';
@@ -12,7 +9,6 @@ const ACCESS_MAP = {
 };
 // --- КОНЕЦ НАСТРОЕК ---
 
-// Отдельная асинхронная функция для основной логики
 async function handlePostRequest(req, res) {
   try {
     const { pin_code, app_id } = req.body;
@@ -27,57 +23,78 @@ async function handlePostRequest(req, res) {
       return res.status(500).json({ isValid: false, message: 'Server configuration error' });
     }
 
-    const authConfig = { auth: { username: BPIUM_USER, password: BPIUM_PASSWORD } };
-    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/find`;
+    // Создаем заголовок для Basic Auth
+    const basicAuth = 'Basic ' + Buffer.from(BPIUM_USER + ':' + BPIUM_PASSWORD).toString('base64');
+
+    // 4. Ищем пин-код в Бипиуме с помощью fetch
+    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records`;
     const findPayload = {
       filters: { and: [{ field: FIELD_ID_PIN_CODE, operator: '=', value: pin_code }, { field: FIELD_ID_IS_USED, operator: '=', value: false }] },
       limit: 1,
     };
+    
+    const findResponse = await fetch(findUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': basicAuth
+      },
+      body: JSON.stringify(findPayload)
+    });
 
-    const findResponse = await axios.post(findUrl, findPayload, authConfig);
-    const record = findResponse.data[0];
+    if (!findResponse.ok) throw new Error(`Bpium find request failed with status ${findResponse.status}`);
+    
+    const records = await findResponse.json();
+    const record = records[0];
 
     if (!record) {
       return res.status(404).json({ isValid: false, message: 'PIN not found or already used.' });
     }
 
+    // 5. Проверяем права доступа
     const productTypeId = record.values[FIELD_ID_PRODUCT_TYPE]?.id;
     const allowedApps = ACCESS_MAP[productTypeId];
     if (!allowedApps || !allowedApps.includes(app_id)) {
       return res.status(403).json({ isValid: false, message: 'Access to this application is denied for this PIN.' });
     }
 
+    // 6. Помечаем пин-код как использованный
     const updateUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/${record.id}`;
     const updatePayload = { values: { [FIELD_ID_IS_USED]: true } };
-    await axios.patch(updateUrl, updatePayload, authConfig);
-    
+
+    const updateResponse = await fetch(updateUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': basicAuth
+      },
+      body: JSON.stringify(updatePayload)
+    });
+
+    if (!updateResponse.ok) throw new Error(`Bpium update request failed with status ${updateResponse.status}`);
+
+    // 7. Отправляем успешный ответ
     return res.status(200).json({ isValid: true, message: 'Access granted' });
 
   } catch (error) {
-    console.error('Error during PIN validation:', error.response?.data || error.message);
+    console.error('Error during PIN validation:', error.message);
     return res.status(500).json({ isValid: false, message: 'An error occurred while validating the PIN.' });
   }
 }
 
 // Главный обработчик, который вызывает Vercel
 export default async function handler(req, res) {
-  // --- УЛУЧШЕННАЯ ОБРАБОТКА CORS ---
-  // Устанавливаем заголовки для ВСЕХ ответов
-  res.setHeader('Access-Control-Allow-Origin', '*'); // Разрешаем доступ всем
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Если это предварительный OPTIONS-запрос, просто отвечаем OK и выходим.
-  // Никакой другой логики здесь быть не должно!
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
   
-  // Если это POST-запрос, передаем управление нашей основной функции
   if (req.method === 'POST') {
     return await handlePostRequest(req, res);
   }
 
-  // Для всех остальных методов (GET и т.д.) отвечаем ошибкой
   return res.status(405).json({ message: 'Method Not Allowed' });
 }
