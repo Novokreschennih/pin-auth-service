@@ -27,7 +27,7 @@ async function handlePostRequest(req, res) {
     const basicAuth = 'Basic ' + Buffer.from(BPIUM_USER + ':' + BPIUM_PASSWORD).toString('base64');
 
     // 4. Ищем пин-код в Бипиуме с помощью fetch
-    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records`;
+    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/find`;
     const findPayload = {
       filters: { and: [{ field: FIELD_ID_PIN_CODE, operator: '=', value: pin_code }, { field: FIELD_ID_IS_USED, operator: '=', value: false }] },
       limit: 1,
