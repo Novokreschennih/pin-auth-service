@@ -1,5 +1,3 @@
-const axios = require('axios');
-
 // --- НАСТРОЙКИ ---
 const BPIUM_CATALOG_ID = 'pin-codes';
 const FIELD_ID_PIN_CODE = '2';
@@ -9,8 +7,8 @@ const ACCESS_MAP = {
   '2': ['app1', 'app2', 'app3', 'app4'],
   '1': ['app1', 'app2'],
 };
-const ID_IS_USED_NO = '1';  // ID для значения "Нет"
-const ID_IS_USED_YES = '2'; // ID для значения "Да"
+const ID_IS_USED_NO = '1';
+const ID_IS_USED_YES = '2';
 // --- КОНЕЦ НАСТРОЕК ---
 
 async function handlePostRequest(req, res) {
@@ -27,46 +25,68 @@ async function handlePostRequest(req, res) {
       return res.status(500).json({ isValid: false, message: 'Server configuration error' });
     }
 
-    const authConfig = { auth: { username: BPIUM_USER, password: BPIUM_PASSWORD } };
+    // Собираем Basic Auth заголовок вручную
+    const basicAuth = 'Basic ' + Buffer.from(BPIUM_USER + ':' + BPIUM_PASSWORD).toString('base64');
 
-    // --- НОВЫЙ СПОСОБ ПОИСКА ПО ДОКУМЕНТАЦИИ ---
-    // Мы используем GET-запрос и передаем фильтры как JSON в параметрах URL
+    // --- ПОИСК ЧЕРЕЗ FETCH + GET-ПАРАМЕТРЫ (ПО ДОКУМЕНТАЦИИ) ---
     const filters = {
       [FIELD_ID_PIN_CODE]: pin_code,
-      [FIELD_ID_IS_USED]: { "$or": [ID_IS_USED_NO] } // Ищем по ID значения "Нет"
+      [FIELD_ID_IS_USED]: { "$or": [ID_IS_USED_NO] }
     };
     
-    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records`;
+    // Кодируем фильтры для URL
+    const params = new URLSearchParams({
+      filters: JSON.stringify(filters),
+      limit: 1
+    });
 
-    const findResponse = await axios.get(findUrl, {
-      ...authConfig,
-      params: {
-        filters: JSON.stringify(filters),
-        limit: 1
+    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records?${params.toString()}`;
+
+    const findResponse = await fetch(findUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': basicAuth
       }
     });
 
-    const record = findResponse.data[0];
+    if (!findResponse.ok) {
+      throw new Error(`Bpium find request failed with status ${findResponse.status}`);
+    }
+
+    const records = await findResponse.json();
+    const record = records[0];
 
     if (!record) {
       return res.status(404).json({ isValid: false, message: 'PIN not found or already used.' });
     }
 
-    const productTypeId = record.values[FIELD_ID_PRODUCT_TYPE]; // Для категорий ID лежит напрямую
+    const productTypeId = record.values[FIELD_ID_PRODUCT_TYPE];
     const allowedApps = ACCESS_MAP[productTypeId];
     if (!allowedApps || !allowedApps.includes(app_id)) {
       return res.status(403).json({ isValid: false, message: 'Access to this application is denied for this PIN.' });
     }
 
-    // 6. Помечаем пин-код как использованный
+    // --- ОБНОВЛЕНИЕ ЧЕРЕЗ FETCH + PATCH ---
     const updateUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/${record.id}`;
-    const updatePayload = { values: { [FIELD_ID_IS_USED]: [ID_IS_USED_YES] } }; // Передаем как массив
-    await axios.patch(updateUrl, updatePayload, authConfig);
-    
+    const updatePayload = { values: { [FIELD_ID_IS_USED]: [ID_IS_USED_YES] } };
+
+    const updateResponse = await fetch(updateUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': basicAuth
+      },
+      body: JSON.stringify(updatePayload)
+    });
+
+    if (!updateResponse.ok) {
+      throw new Error(`Bpium update request failed with status ${updateResponse.status}`);
+    }
+
     return res.status(200).json({ isValid: true, message: 'Access granted' });
 
   } catch (error) {
-    console.error('Error during PIN validation:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+    console.error('Error during PIN validation:', error.message);
     return res.status(500).json({ isValid: false, message: 'An error occurred while validating the PIN.' });
   }
 }
@@ -74,7 +94,7 @@ async function handlePostRequest(req, res) {
 // Главный обработчик, который вызывает Vercel
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-control-allow-headers', 'Content-Type, Authorization'); // Добавили Authorization
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   
   if (req.method === 'OPTIONS') {
@@ -82,6 +102,7 @@ export default async function handler(req, res) {
   }
   
   if (req.method === 'POST') {
+    // Vercel должен автоматически парсить JSON для POST. Если нет - будем разбираться.
     return await handlePostRequest(req, res);
   }
 
