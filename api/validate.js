@@ -2,28 +2,36 @@
 const axios = require('axios');
 
 // --- НАСТРОЙКИ ВАШЕЙ СИСТЕМЫ ---
-// Замените значения на ваши реальные ID из Бипиум
-
 const BPIUM_CATALOG_ID = 'pin-codes'; // Текстовый ID вашего каталога
 
-// Числовые ID полей
+// Числовые ID полей (замените на ваши)
 const FIELD_ID_PIN_CODE = '2';
 const FIELD_ID_PRODUCT_TYPE = '3';
 const FIELD_ID_IS_USED = '4';
 
-// Карта доступа: определяет, какой тип продукта к каким приложениям дает доступ.
-// Это центральное место для управления правами.
+// Карта доступа: определяет, какой ID продукта к каким приложениям дает доступ.
 const ACCESS_MAP = {
-  '2': ['app1', 'app2', 'app3', 'app4'],
-  '1': ['app1', 'app2'],
-  // Добавляйте сюда новые типы продуктов по мере необходимости
+  // 'ID продукта из Бипиум': ['список id приложений']
+  '2': ['app1', 'app2', 'app3', 'app4'], // Например, "Полный пакет"
+  '1': ['app1', 'app2'],                // Например, "Базовый пакет"
 };
-
 // --- КОНЕЦ НАСТРОЕК ---
 
 
 // Основная функция, которая будет выполняться на Vercel
 export default async function handler(req, res) {
+  // --- ДОБАВЛЕНО: Обработка CORS ---
+  // Устанавливаем заголовки, разрешающие кросс-доменные запросы
+  res.setHeader('Access-Control-Allow-Origin', '*'); // В продакшене лучше указать домены ваших приложений
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Браузеры отправляют предварительный OPTIONS-запрос для проверки CORS
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  // --- КОНЕЦ БЛОКА CORS ---
+
   // 1. Проверяем, что запрос использует метод POST
   if (req.method !== 'POST') {
     return res.status(405).json({ isValid: false, message: 'Method Not Allowed' });
@@ -36,7 +44,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
   }
 
-  // 3. Получаем логин и пароль из переменных окружения Vercel для безопасности
+  // 3. Получаем логин и пароль из переменных окружения
   const BPIUM_USER = process.env.BPIUM_USER;
   const BPIUM_PASSWORD = process.env.BPIUM_PASSWORD;
 
@@ -45,7 +53,6 @@ export default async function handler(req, res) {
     return res.status(500).json({ isValid: false, message: 'Server configuration error' });
   }
 
-  // Настраиваем Basic Auth для всех запросов
   const authConfig = {
     auth: {
       username: BPIUM_USER,
@@ -55,7 +62,8 @@ export default async function handler(req, res) {
 
   try {
     // 4. Ищем пин-код в Бипиуме
-    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records`;
+    // ИСПРАВЛЕНО: URL для поиска записей должен заканчиваться на /find
+    const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/find`;
     const findPayload = {
       filters: {
         and: [
@@ -69,20 +77,20 @@ export default async function handler(req, res) {
     const findResponse = await axios.post(findUrl, findPayload, authConfig);
     const record = findResponse.data[0];
 
-    // Если запись не найдена, значит пин неверный или уже использован
     if (!record) {
       return res.status(404).json({ isValid: false, message: 'PIN not found or already used.' });
     }
 
-    // 5. Проверяем права доступа для этого пин-кода
-    const productType = record.values[FIELD_ID_PRODUCT_TYPE]?.title; // У полей "Категория" значение лежит в .title
-    const allowedApps = ACCESS_MAP[productType];
+    // 5. Проверяем права доступа
+    // ИСПРАВЛЕНО: Для полей "Категория" нужно брать ID, а не title, чтобы сопоставить с ACCESS_MAP
+    const productTypeId = record.values[FIELD_ID_PRODUCT_TYPE]?.id;
+    const allowedApps = ACCESS_MAP[productTypeId];
 
     if (!allowedApps || !allowedApps.includes(app_id)) {
       return res.status(403).json({ isValid: false, message: 'Access to this application is denied for this PIN.' });
     }
 
-    // 6. Если все проверки пройдены, помечаем пин-код как использованный
+    // 6. Помечаем пин-код как использованный
     const updateUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/${record.id}`;
     const updatePayload = {
       values: {
@@ -92,15 +100,11 @@ export default async function handler(req, res) {
     
     await axios.patch(updateUrl, updatePayload, authConfig);
     
-    // 7. Отправляем успешный ответ приложению
+    // 7. Отправляем успешный ответ
     return res.status(200).json({ isValid: true, message: 'Access granted' });
 
   } catch (error) {
-    // 8. Обрабатываем возможные ошибки (включая плавающую 401)
-    // Логируем ошибку на сервере для отладки
     console.error('Error during PIN validation:', error.response?.data || error.message);
-    
-    // Отправляем общую ошибку клиенту
     return res.status(500).json({ isValid: false, message: 'An error occurred while validating the PIN.' });
   }
 }
