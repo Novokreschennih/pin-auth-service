@@ -9,11 +9,32 @@ const ACCESS_MAP = {
 };
 const ID_IS_USED_NO = '1';
 const ID_IS_USED_YES = '2';
-// --- КОНЕЦ НАСТРОЕК ---
+// --- КОНЕЦ НАСТРОЕ-К ---
+
+// Вспомогательная функция для ручного чтения тела запроса
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
 
 async function handlePostRequest(req, res) {
   try {
-    const { pin_code, app_id } = req.body;
+    // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Читаем и парсим тело вручную ---
+    const body = await parseBody(req);
+    // ----------------------------------------------------
+
+    const { pin_code, app_id } = body;
     if (!pin_code || !app_id) {
       return res.status(400).json({ isValid: false, message: 'pin_code and app_id are required' });
     }
@@ -25,29 +46,18 @@ async function handlePostRequest(req, res) {
       return res.status(500).json({ isValid: false, message: 'Server configuration error' });
     }
 
-    // Собираем Basic Auth заголовок вручную
     const basicAuth = 'Basic ' + Buffer.from(BPIUM_USER + ':' + BPIUM_PASSWORD).toString('base64');
+    const headers = { 'Authorization': basicAuth, 'Content-Type': 'application/json' };
 
-    // --- ПОИСК ЧЕРЕЗ FETCH + GET-ПАРАМЕТРЫ (ПО ДОКУМЕНТАЦИИ) ---
     const filters = {
       [FIELD_ID_PIN_CODE]: pin_code,
       [FIELD_ID_IS_USED]: { "$or": [ID_IS_USED_NO] }
     };
     
-    // Кодируем фильтры для URL
-    const params = new URLSearchParams({
-      filters: JSON.stringify(filters),
-      limit: 1
-    });
-
+    const params = new URLSearchParams({ filters: JSON.stringify(filters), limit: 1 });
     const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records?${params.toString()}`;
 
-    const findResponse = await fetch(findUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': basicAuth
-      }
-    });
+    const findResponse = await fetch(findUrl, { method: 'GET', headers: { 'Authorization': basicAuth } });
 
     if (!findResponse.ok) {
       throw new Error(`Bpium find request failed with status ${findResponse.status}`);
@@ -66,16 +76,12 @@ async function handlePostRequest(req, res) {
       return res.status(403).json({ isValid: false, message: 'Access to this application is denied for this PIN.' });
     }
 
-    // --- ОБНОВЛЕНИЕ ЧЕРЕЗ FETCH + PATCH ---
     const updateUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/${record.id}`;
     const updatePayload = { values: { [FIELD_ID_IS_USED]: [ID_IS_USED_YES] } };
 
     const updateResponse = await fetch(updateUrl, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': basicAuth
-      },
+      headers: headers,
       body: JSON.stringify(updatePayload)
     });
 
@@ -91,7 +97,7 @@ async function handlePostRequest(req, res) {
   }
 }
 
-// Главный обработчик, который вызывает Vercel
+// Главный обработчик
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -102,7 +108,6 @@ export default async function handler(req, res) {
   }
   
   if (req.method === 'POST') {
-    // Vercel должен автоматически парсить JSON для POST. Если нет - будем разбираться.
     return await handlePostRequest(req, res);
   }
 
