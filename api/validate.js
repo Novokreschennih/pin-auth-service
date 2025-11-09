@@ -29,7 +29,13 @@ async function handlePostRequest(req, res) {
     // 4. Ищем пин-код в Бипиуме с помощью fetch
     const findUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/find`;
     const findPayload = {
-      filters: { and: [{ field: FIELD_ID_PIN_CODE, operator: '=', value: pin_code }, { field: FIELD_ID_IS_USED, operator: '=', value: false }] },
+      filters: {
+        and: [
+          { field: FIELD_ID_PIN_CODE, operator: '=', value: pin_code },
+          // ИСПРАВЛЕНО: Ищем записи, где галочка "is_used" имеет значение '1' (что равно "Нет")
+          { field: FIELD_ID_IS_USED, operator: '=', value: '1' },
+        ],
+      },
       limit: 1,
     };
     
@@ -60,7 +66,7 @@ async function handlePostRequest(req, res) {
 
     // 6. Помечаем пин-код как использованный
     const updateUrl = `https://yaronov.bpium.ru/api/v1/catalogs/${BPIUM_CATALOG_ID}/records/${record.id}`;
-    const updatePayload = { values: { [FIELD_ID_IS_USED]: true } };
+    const updatePayload = { values: { [FIELD_ID_IS_USED]: '2' } };
 
     const updateResponse = await fetch(updateUrl, {
       method: 'PATCH',
