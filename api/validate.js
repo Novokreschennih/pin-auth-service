@@ -28,6 +28,9 @@ const pool = new Pool({
 });
 
 async function handlePostRequest(req, res) {
+  const body = await parseBody(req);
+console.log("Received parsed body:", body); // Добавим лог, чтобы видеть результат
+const { pin_code, app_id } = body;
   try {
     // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Читаем и парсим тело вручную ---
     const body = await parseBody(req);
